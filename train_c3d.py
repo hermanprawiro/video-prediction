@@ -10,14 +10,14 @@ from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
 from dataloaders.bp4d import BP4D_Micro, BP4D_Single
-from models import networks
+from models import c3d
 from utils.misc import to_one_hot
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=50)
-parser.add_argument("--batch_size", type=int, default=32)
+parser.add_argument("--n_epochs", type=int, default=25)
+parser.add_argument("--batch_size", type=int, default=16)
 parser.add_argument("--learning_rate", type=float, default=2e-4)
 parser.add_argument("--beta1", type=float, default=0.5)
 parser.add_argument("--beta2", type=float, default=0.999)
@@ -30,10 +30,10 @@ parser.add_argument("--latent_dim", type=int, default=128)
 parser.add_argument("--image_ch", type=int, default=3)
 parser.add_argument("--image_res", type=int, default=128)
 parser.add_argument("--image_gray", action="store_true")
-parser.add_argument("--frame_length", type=int, default=4)
+parser.add_argument("--frame_length", type=int, default=16)
 parser.add_argument("--checkpoint_path", type=str, default="checkpoints")
 parser.add_argument("--result_path", type=str, default="results")
-parser.add_argument("--save_name", type=str, default="simple")
+parser.add_argument("--save_name", type=str, default="c3d")
 
 def main(args):
     if device.type == 'cuda':
@@ -54,18 +54,16 @@ def main(args):
         # transforms.Normalize([0.5]*args.image_ch, [0.5]*args.image_ch)
     ])
 
-    dataset = BP4D_Micro(train=True, grayscale=args.image_gray, transform=tfs, frame_length=args.frame_length, frame_dilation=4)
+    dataset = BP4D_Micro(train=True, grayscale=args.image_gray, transform=tfs, frame_length=args.frame_length, frame_dilation=0)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.n_workers, shuffle=True, pin_memory=True)
 
-    netE = networks.ImageEncoder(img_dim=args.image_ch, latent_dim=args.latent_dim, base_dim=args.ndf).to(device)
-    netT = networks.LatentTransform(latent_dim=args.latent_dim, output_frame=(args.frame_length - 1)).to(device)
-    netG = networks.Decoder(img_dim=args.image_ch, latent_dim=args.latent_dim, base_dim=args.ngf).to(device)
+    netE = c3d.Encoder(img_dim=args.image_ch, latent_dim=args.latent_dim, base_dim=args.ndf).to(device)
+    netG = c3d.Decoder(img_dim=args.image_ch, latent_dim=args.latent_dim, base_dim=args.ngf).to(device)
 
-    optG = torch.optim.Adam(list(netT.parameters()) + list(netE.parameters()) + list(netG.parameters()), lr=2e-4, betas=(args.beta1, args.beta2))
+    optG = torch.optim.Adam(list(netE.parameters()) + list(netG.parameters()), lr=2e-4, betas=(args.beta1, args.beta2))
     # optD = torch.optim.Adam(netD.parameters(), lr=1e-4, betas=(args.beta1, args.beta2))
 
     netG.train()
-    netT.train()
     netE.train()
     for epoch in range(args.n_epochs):
         for i, (x_real, task_ids, _, _) in enumerate(dataloader):
@@ -73,57 +71,35 @@ def main(args):
             n_batch = x_real.shape[0]
 
             optG.zero_grad()
-            x_first = x_real[:, :, 0]
-            z_first = netE(x_first)
+            z = netE(x_real)
+            x_recon = netG(z)
+            loss = F.binary_cross_entropy(x_recon, x_real)
             
-            t = netT(z_first)
-            z_rest = z_first.unsqueeze(1) + t
-            z_rest = z_rest.view(n_batch * netT.output_frame, -1)
-
-            delta_rest = netG(z_rest).view((n_batch, netT.output_frame) + x_first.shape[1:]).permute(0, 2, 1, 3, 4)
-            # recon_rest = x_first.unsqueeze(2) + delta_rest
-            recon_rest = delta_rest
-            recon_first = netG(z_first)
-
-            loss_first = F.binary_cross_entropy(recon_first, x_first)
-            loss_rest = F.binary_cross_entropy(recon_rest, x_real[:, :, 1:])
-            loss = loss_first + loss_rest * 10
             loss.backward()
             optG.step()
 
-            # Longer frame length, 8 maybe
-            # Classify task from vector t
-            # Input 2 first frames, predict the rest
-            # t only modify half of z
-
             if i % 50 == 0:
-                print('[%d/%d][%d/%d] Loss First/Rest: %.4f/%.4f | NormT: %.4f'
-                    % (epoch + 1, args.n_epochs, i, len(dataloader), loss_first.item(), loss_rest.item(), t.norm().item()))
+                print('[%d/%d][%d/%d] Loss: %.4f'
+                    % (epoch + 1, args.n_epochs, i, len(dataloader), loss.item()))
 
                 # Reconstruction from real image
                 x_real = x_real[:8].detach()
-                recon_first = recon_first[:8].detach().unsqueeze(2)
-                recon_rest = recon_rest[:8].detach()
-                recon = torch.cat([recon_first, recon_rest], dim=2)
-                errors = (x_real - recon).abs()
-                errors = (errors - errors.min()) / (errors.max() - errors.min())
-                delta_rest = (recon_first - recon_rest).abs()
-                delta_rest = (delta_rest - delta_rest.min()) / (delta_rest.max() - delta_rest.min())
-                vis = torch.cat([x_real, recon, errors, delta_rest], dim=2).permute(0, 2, 1, 3, 4)
+                x_recon = x_recon[:8].detach()
+                vis = torch.cat([x_real, x_recon], dim=2).permute(0, 2, 1, 3, 4)
                 vis = torch.reshape(vis, (vis.shape[0] * vis.shape[1],) + vis.shape[2:])
-                save_image(vis, '%s/epoch%03d_%04d.jpg' % (args.result_path, epoch + 1, i + 1), normalize=False, nrow=15)
+                save_image(vis, '%s/epoch%03d_%04d.jpg' % (args.result_path, epoch + 1, i + 1), normalize=False, nrow=16)
 
-        save_model((netG, netT, netE), (optG), epoch, args.checkpoint_path)
+        save_model((netG, netE), (optG), epoch, args.checkpoint_path)
 
 
 def save_model(models, optimizers, epoch, checkpoint_path):
-    netG, netT, netE = models
+    netG, netE = models
     # optG, optD = optimizers
 
     checkpoint = {
         'state_dict': {
             'generator': netG.state_dict(),
-            'transform': netT.state_dict(),
+            # 'transform': netT.state_dict(),
             'encoder': netE.state_dict(),
         },
         # 'optimizer': {

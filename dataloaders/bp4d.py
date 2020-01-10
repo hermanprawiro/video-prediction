@@ -93,6 +93,11 @@ class BP4D_Single(Dataset):
         self.root = R"E:\Datasets\BP4D+\Thermal_Frames_Align"
         if grayscale:
             self.root += "_G"
+
+        self.frame_length = frame_length
+        self.frame_stride = frame_stride
+        self.frame_dilation = frame_dilation
+
         if isinstance(subject, int):
             self.subject = self.id_to_subject[subject]
         else:
@@ -106,23 +111,40 @@ class BP4D_Single(Dataset):
         self.filenames = self.__get_list()
 
     def __getitem__(self, idx):
-        img_path = self.filenames[idx]
-        img = Image.open(img_path)
+        img_paths = self.filenames[idx]
+        imgs = []
+        for img_path in img_paths:
+            img = Image.open(img_path)
+            if self.transform is not None:
+                img = self.transform(img)
+            imgs.append(img)
+
         subject_id = self.subject_to_id[self.subject]
         gender_id = 0 if self.subject[0] == "F" else 1
         task_id = self.task_dict[self.task_id]
 
-        if self.transform is not None:
-            img = self.transform(img)
-
-        return img, task_id, subject_id, gender_id
+        return torch.stack(imgs, dim=1), task_id, subject_id, gender_id
 
     def __len__(self):
         return len(self.filenames)
 
     def __get_list(self):
-        filenames = glob.glob(os.path.join(self.root, self.subject, self.task, "*.jpg"))
+        filenames = []
+        files_in_folder = np.array(glob.glob(os.path.join(self.root, self.subject, self.task, "*.jpg")))
+        max_files = len(files_in_folder)
+
+        for j in self._getstartindices(max_files):
+            filenames.append(files_in_folder[self._getindices(j)].tolist())
         return filenames
+    
+    def _getstartindices(self, max_images):
+        return list(range(0, max_images - self._getdilatedlength() + 1, self.frame_stride))
+
+    def _getdilatedlength(self):
+        return self.frame_length * (self.frame_dilation + 1) - self.frame_dilation
+
+    def _getindices(self, start_id):
+        return list(range(start_id, start_id + self._getdilatedlength(), self.frame_dilation + 1))
 
     def __get_subject_dict(self):
         subject_list = [f"F{item+1:03d}" for item in range(82)] + [f"M{item+1:03d}" for item in range(48)] + [f"M{item+1:03d}" for item in range(49, 58)]

@@ -8,20 +8,20 @@ class ImageEncoder(nn.Module):
 
         self.conv = nn.Sequential(
             nn.Conv2d(img_dim, base_dim * 2, 7, stride=2, padding=3), # 64
-            nn.BatchNorm2d(base_dim * 2),
+            # nn.BatchNorm2d(base_dim * 2),
             nn.ReLU(True),
 
             nn.Conv2d(base_dim * 2, base_dim * 4, 3, stride=2, padding=1), # 32
-            nn.BatchNorm2d(base_dim * 4),
+            # nn.BatchNorm2d(base_dim * 4),
             nn.ReLU(True),
             nn.Conv2d(base_dim * 4, base_dim * 8, 3, stride=2, padding=1), # 16
-            nn.BatchNorm2d(base_dim * 8),
+            # nn.BatchNorm2d(base_dim * 8),
             nn.ReLU(True),
             nn.Conv2d(base_dim * 8, base_dim * 16, 3, stride=2, padding=1), # 8
-            nn.BatchNorm2d(base_dim * 16),
+            # nn.BatchNorm2d(base_dim * 16),
             nn.ReLU(True),
             nn.Conv2d(base_dim * 16, base_dim * 16, 3, stride=2, padding=1), # 4
-            nn.BatchNorm2d(base_dim * 16),
+            # nn.BatchNorm2d(base_dim * 16),
             nn.ReLU(True),
         )
         self.linear = nn.Sequential(
@@ -48,8 +48,6 @@ class LatentTransform(nn.Module):
             # nn.Dropout(p=0.2),
             nn.ReLU(True),
             nn.Linear(latent_dim * 2, latent_dim * output_frame),
-            # nn.Dropout(p=0.2),
-            nn.ReLU(True),
         )
 
     def forward(self, x):
@@ -71,23 +69,23 @@ class Decoder(nn.Module):
         self.conv = nn.Sequential(
             nn.Upsample(scale_factor=2), # 8
             nn.Conv2d(base_dim * 16, base_dim * 16, 3, stride=1, padding=1),
-            nn.BatchNorm2d(base_dim * 16),
+            # nn.BatchNorm2d(base_dim * 16),
             nn.ReLU(True),
             nn.Upsample(scale_factor=2), # 16
             nn.Conv2d(base_dim * 16, base_dim * 8, 3, stride=1, padding=1),
-            nn.BatchNorm2d(base_dim * 8),
+            # nn.BatchNorm2d(base_dim * 8),
             nn.ReLU(True),
             nn.Upsample(scale_factor=2), # 32
             nn.Conv2d(base_dim * 8, base_dim * 4, 3, stride=1, padding=1),
-            nn.BatchNorm2d(base_dim * 4),
+            # nn.BatchNorm2d(base_dim * 4),
             nn.ReLU(True),
             nn.Upsample(scale_factor=2), # 64
             nn.Conv2d(base_dim * 4, base_dim * 2, 3, stride=1, padding=1),
-            nn.BatchNorm2d(base_dim * 2),
+            # nn.BatchNorm2d(base_dim * 2),
             nn.ReLU(True),
             nn.Upsample(scale_factor=2), # 128
             nn.Conv2d(base_dim * 2, base_dim, 3, stride=1, padding=1),
-            nn.BatchNorm2d(base_dim),
+            # nn.BatchNorm2d(base_dim),
             nn.ReLU(True),
             nn.Conv2d(base_dim, img_dim, 1),
             nn.Sigmoid()
